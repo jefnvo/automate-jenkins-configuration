@@ -1,0 +1,9 @@
+#!/usr/bin/env sh
+LABELS="${LABELS:-docker}"
+EXECUTORS="${EXECUTORS:-3}"
+FSROOT="${FSROOT:-/tmp/jenkins}"
+HOSTNAME="${HOSTNAME:-http://jenkins:8080/ci}"
+USERNAME="${USERNAME:-admin}"
+PASSWORD=$(cat /run/secrets/jenkins-pass)
+
+java -jar swarm-client.jar -labels=$LABELS -executors=$EXECUTORS -fsroot=/tmp/jenkins -name=docker-$(hostname) -master $HOSTNAME -username $USERNAME -password $PASSWORD

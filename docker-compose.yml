@@ -1,0 +1,114 @@
+version: "3.7"
+
+
+x-logging:
+  &default-logging
+  options:
+    max-size: '100m'
+    max-file: '10'
+  driver: json-file
+
+
+services:
+  jenkins:
+    image: cedrodeploy/jenkins:v2
+    environment:
+      JENKINS_OPTS: "--prefix=/ci --handlerCountMax=300 --webroot=/var/cache/jenkins/war"
+      JAVA_OPTS: "-Djenkins.install.runSetupWizard=false"
+    configs:
+      - source: groovy_generate_pass
+        target: /usr/share/jenkins/ref/init.groovy.d/security.groovy
+      - source: groovy_create_credentials
+        target: /usr/share/jenkins/ref/init.groovy.d/create-credential.groovy 
+      - source: groovy_template_credentials
+        target: /usr/share/jenkins/ref/init.groovy.d/template_credentials.json
+
+        
+    secrets:
+      - jenkins-user
+      - jenkins-pass
+    volumes:
+      - jenkins-home:/var/jenkins_home
+      - jenkins-war:/var/cache/jenkins/war
+    networks:
+      - jenkins
+      - reverse_proxy
+    user: root
+    healthcheck:
+      test: ["CMD", "nc", "-z","localhost", "8080"]
+      interval: 10s
+      timeout: 120s
+      start_period: 400s
+      retries: 10
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.3'
+          memory: 1G
+      labels:
+        - "traefik.enable=true"
+        - "traefik.port=8080"
+        - "traefik.docker.network=reverse_proxy_internal"
+        - "traefik.backend=jenkins"
+        - "traefik.frontend.rule=PathPrefix:/ci"
+
+  jenkins-agent:
+    image: cedrodeploy/jenkins-agent:v2
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /tmp:/tmp
+    networks:
+      - jenkins
+    environment:
+      HOSTNAME: http://jenkins:8080/ci
+    healthcheck:
+      test: ["CMD", "nc", "-z","jenkins", "8080"]
+      interval: 10s
+      timeout: 120s
+      start_period: 400s
+      retries: 10
+    secrets:
+      - jenkins-pass
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: '0.3'
+          memory: 200M
+      placement:
+        constraints:
+          - node.role == manager
+
+
+secrets:
+  jenkins-user:
+    external: true
+  jenkins-pass:
+    external: true
+configs:
+  groovy_generate_pass:
+    file: ./init.groovy.d/security.groovy
+  groovy_create_credentials:
+    file: ./init.groovy.d/create-credential.groovy
+  groovy_template_credentials:
+    file: ./init.groovy.d/template_credentials.json
+
+volumes:
+  jenkins-war:
+  jenkins-home:
+    name: ${ENVIRONMENT}-${VOLUME_NAME}
+    driver_opts:
+      type: "nfs"
+      o: addr=${NFS_IP},rw,vers=4
+      device: ":/${ENVIRONMENT}-${VOLUME_NAME}"
+
+networks:
+  jenkins:
+    driver: overlay
+  reverse_proxy:
+    name: reverse_proxy_internal
+    external: true
